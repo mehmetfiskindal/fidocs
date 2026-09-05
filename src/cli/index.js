@@ -15,7 +15,7 @@ Usage:
 Commands:
   build [dir]     Build documentation to static HTML/Gea (default: .)
   dev   [dir]     Start dev server with live reload (default: .)
-  init  [dir]     Scaffold a docs project (default: .)
+  init  [name]    Scaffold a docs project (asks for a name if omitted)
 
 Options:
   --format <fmt>  Override output format: html | gea | both
@@ -64,7 +64,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
 
     if (command === 'init') {
-      return runCreate([args._[1] || '.']);
+      return runCreate(args._[1] ? [args._[1]] : []);
     }
 
     console.error(`Unknown command: ${command}\n`);

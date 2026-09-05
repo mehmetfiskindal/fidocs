@@ -1,0 +1,21 @@
+---
+description: Always bump fidocs and create-fidocs versions after package changes
+alwaysApply: true
+---
+
+# Version bump (do not skip)
+
+The human does not bump versions. After any change that ships in a published package, bump **both** `package.json` and `create-fidocs/package.json` to the **same** semver before finishing.
+
+- **patch** (`x.y.Z`): bugfix, docs-in-package, small internal change
+- **minor** (`x.Y.0`): user-visible feature (CLI, scaffold, API)
+- **major** (`X.0.0`): breaking CLI/API/output change
+
+Do this even if the user did not mention versions. Do not wait for them to publish.
+
+Scaffolded projects must depend on `fidocs@^<same version>` (read it from `create-fidocs/package.json` — do not hardcode). Keep both package versions in lockstep.
+
+```
+# ❌ leave 0.1.0 after adding a feature
+# ✅ bump both to 0.2.0 (or the next patch)
+```

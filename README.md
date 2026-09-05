@@ -14,7 +14,8 @@ static HTML or a runnable Gea app.
 Create a new docs project:
 
 ```bash
-npm create fidocs my-docs
+npm create fidocs
+# Project name: my-docs
 cd my-docs
 npm install
 npm run dev

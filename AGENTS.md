@@ -14,6 +14,9 @@ app. `format: 'both'` emits both.
 - **No build step**: the package runs directly from `src/` as ESM. `dist/`
   only ever means *generated output*, not compiled library code.
 - Requires **Node >= 18**.
+- **Bump versions after every shippable change** (human will not do this).
+  Keep `package.json` and `create-fidocs/package.json` on the same semver:
+  patch / minor / major. Scaffolded `fidocs` dependency must match.
 
 ## Commands
 
