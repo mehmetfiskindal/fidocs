@@ -1,0 +1,23 @@
+{
+  "name": "create-fidocs",
+  "version": "0.1.0",
+  "description": "Create a Fidocs documentation project",
+  "type": "module",
+  "bin": {
+    "create-fidocs": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "scaffold.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "keywords": [
+    "fidocs",
+    "docs",
+    "create",
+    "scaffold"
+  ]
+}

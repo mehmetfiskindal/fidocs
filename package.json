@@ -1,0 +1,36 @@
+{
+  "name": "fidocs",
+  "version": "0.1.0",
+  "description": "Zero-dependency documentation generator for MD/MDX with Gea component support",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "templates",
+    "create-fidocs/scaffold.js"
+  ],
+  "bin": {
+    "fidocs": "./bin/fidocs.js",
+    "create-fidocs": "./bin/create-fidocs.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\"",
+    "build:example": "node bin/fidocs.js build examples/gea-docs",
+    "dev:example": "node bin/fidocs.js dev examples/gea-docs"
+  },
+  "keywords": [
+    "docs",
+    "documentation",
+    "markdown",
+    "mdx",
+    "gea"
+  ],
+  "license": "MIT"
+}

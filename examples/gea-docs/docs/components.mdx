@@ -1,0 +1,22 @@
+---
+title: Components
+order: 2
+---
+
+import Counter from './components/Counter.jsx'
+import { Callout } from './components/Callout.jsx'
+
+# Using Gea Components
+
+MDX lets you embed interactive **Gea** components directly in your docs.
+
+<Callout type="tip">
+You can pass props like `count` and children to components.
+</Callout>
+
+## Live example
+
+<Counter start={10} />
+
+That component renders using the Gea runtime when you emit a Gea app
+with `format: 'gea'`.
