@@ -59,6 +59,9 @@ export default {
 
 ## Development
 
+Architecture, pipeline, AST, plugins, and contribution constraints:
+see **[DEVELOPMENT.md](./DEVELOPMENT.md)**.
+
 ```bash
 npm test              # run full test suite (node --test)
 npm run build:example # build the bundled example project
