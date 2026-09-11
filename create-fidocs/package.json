@@ -1,10 +1,10 @@
 {
   "name": "create-fidocs",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Create a Fidocs documentation project",
   "type": "module",
   "bin": {
-    "create-fidocs": "./index.js"
+    "create-fidocs": "index.js"
   },
   "files": [
     "index.js",

@@ -18,7 +18,7 @@ Commands:
   init  [name]    Scaffold a docs project (asks for a name if omitted)
 
 Options:
-  --format <fmt>  Override output format: html | gea | both
+  --format <fmt>  Override output format: html | gea | both | embed
   --port <n>      Dev server port (default: 4321)
   -h, --help      Show this help
 `;

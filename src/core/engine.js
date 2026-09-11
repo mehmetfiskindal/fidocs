@@ -90,6 +90,9 @@ export async function build(root) {
   if (config.format === 'gea' || config.format === 'both') {
     written.push(...(await emitGea(config, pages, outDir)));
   }
+  if (config.format === 'embed') {
+    written.push(...(await emitEmbed(config, pages, outDir)));
+  }
 
   await hooks.run('afterGenerate', { pages, written }, {});
   return { pages, written };
@@ -161,11 +164,15 @@ async function emitHtml(config, pages, outDir, root) {
   return written;
 }
 
-async function emitGea(config, pages, outDir) {
+/**
+ * Write one Gea component file per page (plus copied local components),
+ * returning the files written and the route descriptors for those pages.
+ * @param {string} appDir
+ * @param {object[]} pages
+ * @returns {Promise<{ written: string[], routes: object[] }>}
+ */
+async function writePageComponents(appDir, pages) {
   const written = [];
-  const appDir = path.join(outDir, config.gea.dir);
-  await mkdir(appDir, { recursive: true });
-
   const routes = [];
   for (const page of pages) {
     const { filename, code } = generateGeaPage(page);
@@ -179,6 +186,27 @@ async function emitGea(config, pages, outDir) {
     });
     written.push(...(await copyLocalComponents(appDir, page)));
   }
+  return { written, routes };
+}
+
+/**
+ * Serialize route descriptors to a `routes.js` source string.
+ * @param {object[]} routes
+ * @returns {string}
+ */
+function routesCode(routes) {
+  return `export const routes = [\n${routes
+    .map((r) => `  { path: '${r.path}', component: () => import('./${r.component}.jsx'), title: ${JSON.stringify(r.title)} },`)
+    .join('\n')}\n]\n`;
+}
+
+async function emitGea(config, pages, outDir) {
+  const written = [];
+  const appDir = path.join(outDir, config.gea.dir);
+  await mkdir(appDir, { recursive: true });
+
+  const { written: pageFiles, routes } = await writePageComponents(appDir, pages);
+  written.push(...pageFiles);
 
   if (!pages.some((p) => p.slug === 'index')) {
     const items = pages
@@ -205,10 +233,6 @@ ${items}
     routes.unshift({ path: '/', component: 'Index', title: config.title });
   }
 
-  const routesCode = `export const routes = [\n${routes
-    .map((r) => `  { path: '${r.path}', component: () => import('./${r.component}.jsx'), title: ${JSON.stringify(r.title)} },`)
-    .join('\n')}\n]\n`;
-
   const appCode = `import { Component, Link, RouterView } from '@geajs/core'
 import { routes } from './routes.js'
 
@@ -234,7 +258,7 @@ export default class FidocsApp extends Component {
 }
 `;
 
-  for (const [name, code] of [['routes.js', routesCode], ['App.jsx', appCode]]) {
+  for (const [name, code] of [['routes.js', routesCode(routes)], ['App.jsx', appCode]]) {
     const out = path.join(appDir, name);
     await writeFile(out, code);
     written.push(out);
@@ -250,6 +274,26 @@ export default class FidocsApp extends Component {
   const pkgPath = path.join(appDir, 'package.json');
   await writeFile(pkgPath, JSON.stringify(pkg, null, 2));
   written.push(pkgPath);
+  return written;
+}
+
+/**
+ * Emit embeddable Gea components for an existing Gea app: page components
+ * plus a `routes.js` the host app can merge into its own router. No
+ * standalone App.jsx, nav or package.json is generated.
+ * @param {object} config
+ * @param {object[]} pages
+ * @param {string} outDir
+ */
+async function emitEmbed(config, pages, outDir) {
+  const written = [];
+  await mkdir(outDir, { recursive: true });
+  const { written: pageFiles, routes } = await writePageComponents(outDir, pages);
+  written.push(...pageFiles);
+
+  const out = path.join(outDir, 'routes.js');
+  await writeFile(out, routesCode(routes));
+  written.push(out);
   return written;
 }
 

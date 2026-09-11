@@ -12,7 +12,7 @@ import path from 'node:path';
 export const DEFAULTS = {
   input: 'docs',
   output: 'dist',
-  format: 'html', // 'html' | 'gea' | 'both'
+  format: 'html', // 'html' | 'gea' | 'both' | 'embed'
   title: 'Documentation',
   description: '',
   template: null, // path to custom HTML template file (relative to root)

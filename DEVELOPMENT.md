@@ -18,6 +18,7 @@ Bir doküman projesinde `docs/` altındaki `.md` / `.mdx` dosyalarını okur ve 
 | `html` | Statik HTML sayfaları | Basit, etkileşimsiz doküman; CDN / GitHub Pages / herhangi bir statik host |
 | `gea` | Çalıştırılabilir [Gea](https://www.npmjs.com/package/@geajs/core) uygulaması | MDX içinde canlı bileşenler (`<Counter />`) istiyorsan |
 | `both` | İkisi birden | Örnek proje ve “ikisini de dene” senaryosu |
+| `embed` | Gea bileşenleri + `routes.js` | Mevcut bir Gea sitesine (`npm create gea@latest` gibi) doküman gömmek; ayrı site istenmez |
 
 **Ne değildir**
 
@@ -94,6 +95,7 @@ Yok / sınırlı: setext başlık, referans link, tam HTML bloğu, GFM task list
   `<div class="fidocs-component" data-component="Ad">`.  
   `config.components` ile SSR fonksiyonu verilirse `resolveComponent` çağrılır.
 - **Gea:** AST → JSX. Bileşenler ve `{expr}` gerçek JSX olarak geçer; derleme `@geajs/vite-plugin`’e bırakılır. Her sayfa `class X extends Component { template() { … } }` olur.
+- **Embed:** AST → JSX bileşenleri + `routes.js` (yalnızca). `App.jsx`, nav ve `package.json` üretilmez; çıktı doğrudan `output/` altına yazılır ve tüketicinin mevcut Gea router’ına `import { routes }` ile birleştirilir.
 
 ### 2.5 Plugin sözleşmesi
 
@@ -238,7 +240,7 @@ Arama sırası: `fidocs.config.js` (ESM `default` export) → `fidocs.config.jso
 {
   input: 'docs',
   output: 'dist',
-  format: 'html',          // 'html' | 'gea' | 'both'
+  format: 'html',          // 'html' | 'gea' | 'both' | 'embed'
   title: 'Documentation',
   description: '',
   template: null,          // kök-göreli özel HTML şablon
@@ -317,6 +319,12 @@ Bileşen özellikleri: `name`, `name="str"`, `name={expr}`, boolean `name`.
 - `package.json` — `@geajs/core`, `@geajs/vite-plugin`, `vite` (tüketici `gea-app` içinde `npm install && npm run dev` yapar)
 - Yerel bileşen kopyası (`copyLocalComponents`): yalnızca `source` `.` ile başlıyorsa; path traversal’a karşı hedef `appDir` altında kalmalı.
 
+`engine.emitEmbed` (`format: 'embed'`) aynı sayfa bileşenlerini üretir ama
+yalnızca `routes.js` ekler; `App.jsx` ve `package.json` yok. Çıktı `output/`
+köküne yazılır (`config.gea.dir` kullanılmaz). Paylaşılan iş `writePageComponents`
+(her sayfa → `.jsx` + yerel bileşen kopyası + route tanımı) ve `routesCode`
+(route serileştirme) yardımcılarındadır.
+
 ### 6.6 Motor — `src/core/engine.js`
 
 `build(root)`:
@@ -376,6 +384,8 @@ bin/fidocs.js  →  src/cli/index.js
   dev   [dir]     build + startDevServer
   init  [name]    runCreate → create-fidocs/scaffold.js
 ```
+
+`--format html|gea|both|embed` tek seferlik format geçersiz kılar (`FIDOCS_FORMAT`).
 
 `create-fidocs` paketi aynı `scaffold.js`’i kullanır. `fidocsRange()` `create-fidocs/package.json` sürümünü okur; scaffold `fidocs@^oSürüm` yazar. Bu yüzden iki paket **aynı semver’de** tutulur.
 

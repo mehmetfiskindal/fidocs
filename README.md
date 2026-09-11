@@ -34,7 +34,7 @@ node bin/fidocs.js dev my-docs
 
 After publishing `fidocs` and `create-fidocs` to npm, `npm create fidocs` works globally.
 
-Options: `--format html|gea|both`, `--port <n>` (dev), `--help`.
+Options: `--format html|gea|both|embed`, `--port <n>` (dev), `--help`.
 
 As a library:
 
@@ -49,13 +49,39 @@ await build('/path/to/project');
 export default {
   input: 'docs',
   output: 'dist',
-  format: 'both',           // html | gea | both
+  format: 'both',           // html | gea | both | embed
   title: 'My Docs',
   template: null,           // custom HTML template path
   plugins: ['./plugins/x.js'],
   components: { Alert: ({ children }) => `<aside>${children}</aside>` },
 };
 ```
+
+## Embedding into an existing Gea site
+
+`format: 'embed'` compiles your Markdown/MDX into Gea components you can drop
+into an app you already have (e.g. one created with `npm create gea@latest`),
+instead of scaffolding a separate standalone site. It writes page components
+plus a `routes.js` — **no** `App.jsx`, nav or `package.json`.
+
+```js
+export default {
+  input: 'docs',
+  output: 'src/fidocs',   // inside your Gea app's src/
+  format: 'embed',
+};
+```
+
+Then merge the generated routes into your own router:
+
+```js
+import { routes as docRoutes } from './fidocs/routes.js';
+// spread docRoutes into your existing routes array
+```
+
+Each page is a Gea component (`GettingStarted.jsx`, `Components.jsx`, …) with
+its MDX imports and `{expr}`/component usages preserved, so `@geajs/vite-plugin`
+compiles them just like the rest of your app.
 
 ## Development
 

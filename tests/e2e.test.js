@@ -58,6 +58,24 @@ test('honors FIDOCS_FORMAT env override', async () => {
   assert.ok(!written.some((f) => f.endsWith('.html') && !f.includes('gea-app')));
 });
 
+test('format: embed emits components + routes, no standalone app', async () => {
+  const root = await makeProject();
+  await writeFile(path.join(root, 'fidocs.config.js'), "export default { format: 'embed' };\n");
+  const { written } = await build(root);
+
+  assert.ok(written.some((f) => f.endsWith('Index.jsx')));
+  assert.ok(written.some((f) => f.endsWith('Guide.jsx')));
+  assert.ok(written.some((f) => f.endsWith('routes.js')));
+  assert.ok(written.some((f) => f.endsWith('components/Demo.jsx')), 'local component copied');
+  assert.ok(!written.some((f) => f.endsWith('App.jsx')), 'no standalone App.jsx');
+  assert.ok(!written.some((f) => f.endsWith('package.json')), 'no standalone package.json');
+
+  const routes = await readFile(path.join(root, 'dist', 'routes.js'), 'utf8');
+  assert.match(routes, /path: '\/'/);
+  assert.match(routes, /path: '\/guide'/);
+  assert.match(routes, /import\('\.\/Guide\.jsx'\)/);
+});
+
 test('emits a landing index.html when no index.md exists', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'fidocs-noindex-'));
   await mkdir(path.join(root, 'docs'), { recursive: true });
