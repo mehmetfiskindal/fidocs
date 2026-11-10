@@ -5,8 +5,6 @@
  * so @geajs/vite-plugin can compile them.
  */
 
-import { escapeHtml } from './templates.js';
-
 /**
  * Render an AST to a JSX string (the article body).
  * @param {{ children: object[] }} ast
@@ -19,11 +17,11 @@ export function astToJsx(ast) {
 function nodeToJsx(node) {
   switch (node.type) {
     case 'heading':
-      return `<h${node.level} id="${node.id}">${inlineToJsx(node.children)}</h${node.level}>`;
+      return `<h${node.level} id=${jsxStringAttr(node.id)}>${inlineToJsx(node.children)}</h${node.level}>`;
     case 'paragraph':
       return `<p>${inlineToJsx(node.children)}</p>`;
     case 'code':
-      return `<pre class="code"${node.lang ? ` data-lang="${node.lang}"` : ''}><code>${escapeHtml(node.value)}</code></pre>`;
+      return `<pre class="code"${node.lang ? ` data-lang=${jsxStringAttr(node.lang)}` : ''}><code>${jsxText(node.value)}</code></pre>`;
     case 'blockquote':
       return `<blockquote>\n${node.children.map(nodeToJsx).join('\n')}\n</blockquote>`;
     case 'list': {
@@ -43,7 +41,7 @@ function nodeToJsx(node) {
     case 'import':
       return '';
     case 'component':
-      return componentToJsx(node);
+      return componentToJsx(node, false);
     default:
       return '';
   }
@@ -54,18 +52,31 @@ function listItemJsx(child) {
   return nodeToJsx(child);
 }
 
-function componentToJsx(node) {
+/**
+ * Render a component node. Inline components keep their children inline;
+ * block components render child blocks.
+ * @param {object} node
+ * @param {boolean} inline
+ */
+function componentToJsx(node, inline) {
   const attrs = (node.props || [])
     .map((p) => {
+      if (p.name === '...') return `{...${p.value.expr}}`;
       if (p.value === true) return p.name;
-      if (p.value && typeof p.value === 'object' && p.value.expr) return `${p.name}={${p.value.expr}}`;
-      return `${p.name}="${p.value}"`;
+      if (p.value && typeof p.value === 'object' && p.value.expr !== undefined) {
+        return `${p.name}={${p.value.expr}}`;
+      }
+      return `${p.name}=${jsxStringAttr(p.value)}`;
     })
     .join(' ');
   const open = `<${node.name}${attrs ? ' ' + attrs : ''}`;
-  const children = (node.children || []).map(nodeToJsx).filter(Boolean);
-  if (!children.length) return `${open} />`;
-  return `${open}>\n${children.join('\n')}\n</${node.name}>`;
+  const children = inline
+    ? inlineToJsx(node.children || [])
+    : (node.children || []).map(nodeToJsx).filter(Boolean).join('\n');
+
+  if (!children) return `${open} />`;
+  if (inline) return `${open}>${children}</${node.name}>`;
+  return `${open}>\n${children}\n</${node.name}>`;
 }
 
 function inlineToJsx(nodes) {
@@ -85,43 +96,76 @@ function inlineNodeToJsx(node) {
     case 'codespan':
       return `<code>{${JSON.stringify(node.value)}}</code>`;
     case 'link':
-      return `<a href="${node.url}">${inlineToJsx(node.children)}</a>`;
+      return `<a href=${jsxStringAttr(node.url)}${node.title ? ` title=${jsxStringAttr(node.title)}` : ''}>${inlineToJsx(node.children)}</a>`;
     case 'image':
-      return `<img src="${node.url}" alt="${node.alt || ''}" />`;
+      return `<img src=${jsxStringAttr(node.url)} alt=${jsxStringAttr(node.alt || '')}${node.title ? ` title=${jsxStringAttr(node.title)}` : ''} />`;
     case 'expression':
       return `{${node.value}}`;
     case 'inlineHtml':
       return node.value;
     case 'break':
       return '<br />';
+    case 'component':
+      return componentToJsx(node, true);
     default:
       return '';
   }
 }
 
+/**
+ * Emit JSX text safely. Values that JSX would misinterpret are emitted as
+ * a string expression instead of raw text.
+ * @param {unknown} value
+ */
 function jsxText(value) {
-  return value.replace(/&/g, '&amp;').replace(/&amp;lt;/g, '&lt;').replace(/&amp;gt;/g, '&gt;').replace(/[{}]/g, (c) => `{'${c}'}`);
+  const text = String(value ?? '');
+  if (!text) return '';
+  if (/[<>{}\n\r&]/.test(text) || /^\s|\s$/.test(text)) {
+    return `{${JSON.stringify(text)}}`;
+  }
+  return text;
+}
+
+/**
+ * Emit a JSX string attribute. Plain values keep the familiar
+ * `name="value"` form; problematic values become an expression.
+ * @param {unknown} value
+ */
+function jsxStringAttr(value) {
+  const text = String(value ?? '');
+  if (/["\\<>{}\n\r&]/.test(text)) return `{${JSON.stringify(text)}}`;
+  return `"${text}"`;
+}
+
+/**
+ * Derive a safe PascalCase class/file name from a page slug.
+ * Handles nested paths, leading digits and punctuation.
+ * @param {string} slug
+ * @returns {string}
+ */
+export function componentNameFromSlug(slug) {
+  const words = String(slug || '')
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+  let name = words.map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join('');
+  if (!name) name = 'Page';
+  if (/^\p{N}/u.test(name)) name = `Page${name}`;
+  return name;
 }
 
 /**
  * Generate a full Gea component file for one doc page.
  * @param {{ slug: string, imports: object[], ast: object, data: object }} page
+ * @param {{ componentName?: string, jsxImportSource?: string }} [opts]
  * @returns {{ filename: string, code: string }}
  */
-export function generateGeaPage(page) {
-  const componentName = page.slug
-    .split(/[-_\s]+/)
-    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-    .join('');
+export function generateGeaPage(page, opts = {}) {
+  const componentName = opts.componentName || componentNameFromSlug(page.slug);
+  const jsxImportSource = opts.jsxImportSource || '@geajs/core';
 
   const importLines = [
-    "import { Component } from '@geajs/core'",
-    ...page.imports.map((imp) => {
-      const parts = [];
-      if (imp.default) parts.push(imp.default);
-      if (imp.named.length) parts.push(`{ ${imp.named.join(', ')} }`);
-      return `import ${parts.join(', ')} from '${imp.source}'`;
-    }),
+    `import { Component } from ${quoteString(jsxImportSource)}`,
+    ...page.imports.map(importToCode),
   ];
 
   const code = `${importLines.join('\n')}
@@ -141,4 +185,31 @@ ${astToJsx(page.ast)
 `;
 
   return { filename: `${componentName}.jsx`, code };
+}
+
+/**
+ * Serialize one parsed import for the generated page.
+ * @param {object} imp
+ */
+function importToCode(imp) {
+  if (imp.sideEffect) return `import ${quoteString(imp.source)}`;
+
+  const parts = [];
+  if (imp.namespace) parts.push(`* as ${imp.namespace}`);
+  else {
+    if (imp.default) parts.push(imp.default);
+    if (imp.named && imp.named.length) parts.push(`{ ${imp.named.join(', ')} }`);
+  }
+
+  if (!parts.length) return `import ${quoteString(imp.source)}`;
+  return `import ${parts.join(', ')} from ${quoteString(imp.source)}`;
+}
+
+/** Single-quoted JavaScript string literal. */
+function quoteString(value) {
+  return `'${String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')}'`;
 }

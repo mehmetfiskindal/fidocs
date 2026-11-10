@@ -9,9 +9,10 @@
  * @returns {{ data: Record<string, unknown>, content: string }}
  */
 export function parseFrontmatter(raw) {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
-  if (!match) return { data: {}, content: raw };
-  return { data: parseYamlSubset(match[1]), content: raw.slice(match[0].length) };
+  const normalized = String(raw).replace(/^\uFEFF/, '');
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(normalized);
+  if (!match) return { data: {}, content: normalized };
+  return { data: parseYamlSubset(match[1]), content: normalized.slice(match[0].length) };
 }
 
 /**
@@ -34,7 +35,7 @@ function parseYamlSubset(src) {
 
     if (text.startsWith('- ') || text === '-') {
       if (Array.isArray(top.container)) {
-        top.container.push(coerce(text.slice(1).trim()));
+        top.container.push(coerce(stripInlineComment(text.slice(1).trim())));
       }
       continue;
     }
@@ -42,9 +43,10 @@ function parseYamlSubset(src) {
     const kv = /^([^:]+):\s*(.*)$/.exec(text);
     if (!kv) continue;
     const key = kv[1].trim();
-    const rawVal = kv[2].trim();
+    const rawText = kv[2].trim();
+    const rawVal = stripInlineComment(rawText);
 
-    if (rawVal === '') {
+    if (rawText === '') {
       const next = lines[i + 1];
       const isList = next && next.trim().startsWith('-') &&
         next.length - next.trimStart().length >= indent;
@@ -52,7 +54,13 @@ function parseYamlSubset(src) {
       top.container[key] = child;
       stack.push({ indent, container: child, key });
     } else if (rawVal.startsWith('[') && rawVal.endsWith(']')) {
-      top.container[key] = rawVal.slice(1, -1).split(',').map((s) => coerce(s.trim()));
+      const inner = rawVal.slice(1, -1).trim();
+      top.container[key] = inner
+        ? splitInlineArray(inner).map((s) => coerce(s.trim()))
+        : [];
+    } else if (rawVal === '') {
+      // A value that was only a comment is YAML null.
+      top.container[key] = null;
     } else {
       top.container[key] = coerce(rawVal);
     }
@@ -61,8 +69,58 @@ function parseYamlSubset(src) {
   return root;
 }
 
+/**
+ * Remove a YAML inline comment, respecting quoted strings.
+ * @param {string} value
+ * @returns {string}
+ */
+function stripInlineComment(value) {
+  let quote = null;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (quote) {
+      if (ch === quote && value[i - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === '#' && (i === 0 || /\s/.test(value[i - 1]))) {
+      return value.slice(0, i).trimEnd();
+    }
+  }
+  return value;
+}
+
+/**
+ * Split an inline YAML array on commas outside quotes.
+ * @param {string} value
+ * @returns {string[]}
+ */
+function splitInlineArray(value) {
+  const items = [];
+  let current = '';
+  let quote = null;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote && value[i - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; current += ch; continue; }
+    if (ch === ',') { items.push(current); current = ''; continue; }
+    current += ch;
+  }
+  items.push(current);
+  return items;
+}
+
 function coerce(value) {
-  if (/^(['"]).*\1$/.test(value)) return value.slice(1, -1);
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try { return JSON.parse(value); } catch { return value.slice(1, -1); }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1).replace(/''/g, "'");
+  }
   if (value === 'true') return true;
   if (value === 'false') return false;
   if (value === 'null' || value === '~') return null;

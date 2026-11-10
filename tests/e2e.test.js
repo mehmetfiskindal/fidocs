@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { build } from '../src/core/engine.js';
@@ -92,4 +93,122 @@ test('emits a landing index.html when no index.md exists', async () => {
 
   const routes = await readFile(path.join(root, 'dist', 'gea-app', 'routes.js'), 'utf8');
   assert.match(routes, /path: '\/'/);
+});
+
+test('builds nested pages as flat, unique Gea components', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fidocs-nested-'));
+  await mkdir(path.join(root, 'docs', 'guide'), { recursive: true });
+  await writeFile(path.join(root, 'fidocs.config.js'),
+    "export default { format: 'both' };\n");
+  await writeFile(path.join(root, 'docs', 'index.md'), '# Home\n');
+  await writeFile(path.join(root, 'docs', 'guide', 'intro.md'), '# Intro\n\na < b\n');
+
+  const { pages } = await build(root);
+  assert.equal(pages.length, 2);
+  assert.ok(existsSync(path.join(root, 'dist', 'guide', 'intro.html')));
+
+  const jsx = await readFile(path.join(root, 'dist', 'gea-app', 'GuideIntro.jsx'), 'utf8');
+  assert.match(jsx, /class GuideIntro extends Component/);
+  assert.match(jsx, /<p>\{"a < b"\}<\/p>/);
+
+  const routes = await readFile(path.join(root, 'dist', 'gea-app', 'routes.js'), 'utf8');
+  assert.match(routes, /path: '\/guide\/intro'/);
+  assert.match(routes, /import\('\.\/GuideIntro\.jsx'\)/);
+});
+
+test('gives colliding component names distinct files', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fidocs-name-collision-'));
+  await mkdir(path.join(root, 'docs'), { recursive: true });
+  await writeFile(path.join(root, 'fidocs.config.js'),
+    "export default { format: 'embed' };\n");
+  await writeFile(path.join(root, 'docs', 'foo-bar.md'), '# A\n');
+  await writeFile(path.join(root, 'docs', 'FooBar.md'), '# B\n');
+
+  const { written } = await build(root);
+  assert.ok(written.some((f) => f.endsWith('FooBar.jsx')));
+  assert.ok(written.some((f) => f.endsWith('FooBar2.jsx')));
+
+  const routes = await readFile(path.join(root, 'dist', 'routes.js'), 'utf8');
+  assert.match(routes, /import\('\.\/FooBar\.jsx'\)/);
+  assert.match(routes, /import\('\.\/FooBar2\.jsx'\)/);
+});
+
+test('rejects duplicate page slugs instead of overwriting output', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fidocs-duplicate-'));
+  await mkdir(path.join(root, 'docs', 'guide'), { recursive: true });
+  await writeFile(path.join(root, 'fidocs.config.js'),
+    "export default { format: 'html' };\n");
+  await writeFile(path.join(root, 'docs', 'guide.md'), '# Guide\n');
+  await writeFile(path.join(root, 'docs', 'guide', 'index.md'), '# Guide index\n');
+
+  await assert.rejects(() => build(root), /Duplicate page slug "guide"/);
+  assert.ok(existsSync(path.join(root, 'docs', 'guide.md')));
+});
+
+test('rejects unsafe output directories before deleting anything', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fidocs-unsafe-output-'));
+  await mkdir(path.join(root, 'docs'), { recursive: true });
+  await writeFile(path.join(root, 'docs', 'index.md'), '# Home\n');
+
+  for (const output of ['.', 'docs']) {
+    await writeFile(path.join(root, 'fidocs.config.js'),
+      `export default { output: '${output}' };\n`);
+    await assert.rejects(() => build(root), /Unsafe output path/);
+    assert.ok(existsSync(path.join(root, 'docs', 'index.md')));
+    assert.ok(existsSync(path.join(root, 'fidocs.config.js')));
+  }
+});
+
+test('rejects an invalid format before deleting existing output', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fidocs-bad-format-'));
+  await mkdir(path.join(root, 'docs'), { recursive: true });
+  await mkdir(path.join(root, 'dist'), { recursive: true });
+  await writeFile(path.join(root, 'docs', 'index.md'), '# Home\n');
+  await writeFile(path.join(root, 'dist', 'keep.txt'), 'keep');
+  await writeFile(path.join(root, 'fidocs.config.js'),
+    "export default { format: 'htlm' };\n");
+
+  await assert.rejects(() => build(root), /Invalid format "htlm"/);
+  assert.ok(existsSync(path.join(root, 'dist', 'keep.txt')));
+});
+
+test('flattens nested-page imports that would escape the Gea app directory', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fidocs-escape-import-'));
+  await mkdir(path.join(root, 'docs', 'guide'), { recursive: true });
+  await mkdir(path.join(root, 'docs', 'shared'), { recursive: true });
+  await writeFile(path.join(root, 'fidocs.config.js'),
+    "export default { format: 'gea' };\n");
+  await writeFile(path.join(root, 'docs', 'index.md'), '# Home\n');
+  await writeFile(path.join(root, 'docs', 'shared', 'Comp.jsx'),
+    'export default function Comp() { return null }\n');
+  await writeFile(path.join(root, 'docs', 'guide', 'intro.md'),
+    "import Comp from '../shared/Comp.jsx'\n\n# Intro\n\n<Comp />\n");
+
+  const { written } = await build(root);
+  assert.ok(written.some((f) => f.includes(`${path.sep}_fidocs-imports${path.sep}`)));
+
+  const jsx = await readFile(path.join(root, 'dist', 'gea-app', 'GuideIntro.jsx'), 'utf8');
+  assert.match(jsx, /from '\.\/_fidocs-imports\/[^']+Comp\.jsx'/);
+});
+
+test('keeps same-named relative components from different folders separate', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fidocs-same-import-'));
+  for (const dir of ['a', 'b']) {
+    await mkdir(path.join(root, 'docs', dir), { recursive: true });
+    await writeFile(path.join(root, 'docs', dir, 'Comp.jsx'),
+      `export default function Comp() { return ${JSON.stringify(dir)} }\n`);
+    await writeFile(path.join(root, 'docs', dir, 'page.md'),
+      "import Comp from './Comp.jsx'\n\n# Page\n\n<Comp />\n");
+  }
+  await writeFile(path.join(root, 'fidocs.config.js'),
+    "export default { format: 'gea' };\n");
+
+  const { written } = await build(root);
+  assert.ok(written.some((f) => f.endsWith(path.join('gea-app', 'Comp.jsx'))));
+  assert.ok(written.some((f) => f.includes(`${path.sep}_fidocs-imports${path.sep}`)));
+
+  const a = await readFile(path.join(root, 'dist', 'gea-app', 'APage.jsx'), 'utf8');
+  const b = await readFile(path.join(root, 'dist', 'gea-app', 'BPage.jsx'), 'utf8');
+  assert.match(a, /from '\.\/Comp\.jsx'/);
+  assert.match(b, /from '\.\/_fidocs-imports\/[^']+Comp\.jsx'/);
 });

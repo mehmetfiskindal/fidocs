@@ -21,7 +21,7 @@ export function renderHtml(ast, opts = {}) {
 }
 
 function renderNodes(nodes, opts) {
-  return nodes.map((n) => renderNode(n, opts)).filter((s) => s.trim()).join('\n');
+  return nodes.map((n) => renderNode(n, opts)).filter((s) => typeof s === 'string' && s.trim()).join('\n');
 }
 
 /**
@@ -39,7 +39,7 @@ function renderListItem(item, opts) {
 function renderNode(node, opts) {
   switch (node.type) {
     case 'heading':
-      return `<h${node.level} id="${node.id}">${renderInline(node.children, opts)}</h${node.level}>`;
+      return `<h${node.level} id="${escapeHtml(node.id)}">${renderInline(node.children, opts)}</h${node.level}>`;
     case 'paragraph':
       return `<p>${renderInline(node.children, opts)}</p>`;
     case 'code':
@@ -75,13 +75,20 @@ function renderNode(node, opts) {
 
 function renderComponent(node, opts) {
   const props = {};
-  for (const p of node.props || []) props[p.name] = p.value && p.value.expr ? p.value.expr : p.value;
-  const childrenHtml = renderNodes(node.children || [], opts);
+  for (const p of node.props || []) {
+    if (p.name === '...') continue;
+    props[p.name] = p.value && p.value.expr ? p.value.expr : p.value;
+  }
+  const childrenHtml = node.inline
+    ? renderInline(node.children || [], opts)
+    : renderNodes(node.children || [], opts);
   if (opts.resolveComponent) return opts.resolveComponent(node.name, props, childrenHtml);
   const attrs = Object.entries(props)
     .map(([k, v]) => (v === true ? k : `data-${escapeHtml(k)}="${escapeHtml(String(v))}"`))
     .join(' ');
-  return `<div class="fidocs-component" data-component="${escapeHtml(node.name)}" ${attrs}>${childrenHtml}</div>`;
+  const tag = node.inline ? 'span' : 'div';
+  const extra = attrs ? ` ${attrs}` : '';
+  return `<${tag} class="fidocs-component" data-component="${escapeHtml(node.name)}"${extra}>${childrenHtml}</${tag}>`;
 }
 
 function renderInline(nodes, opts) {

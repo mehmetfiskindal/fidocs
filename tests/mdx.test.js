@@ -34,3 +34,44 @@ test('walk visits every node', () => {
   walk(ast, () => count++);
   assert.ok(count >= 4);
 });
+
+test('walk visits table cell contents', () => {
+  const { ast } = parseMdx('| head | other |\n| --- | --- |\n| **bold** | text |');
+  const texts = [];
+  walk(ast, (node) => {
+    if (node.type === 'text') texts.push(node.value);
+  });
+  assert.deepEqual(texts.sort(), ['bold', 'head', 'other', 'text']);
+});
+
+test('extracts side-effect and namespace imports', () => {
+  const { imports } = parseMdx(
+    "import './style.css'\nimport * as utils from './utils.js'\n\n# T",
+  );
+  assert.deepEqual(imports[0], {
+    default: null, named: [], namespace: null, sideEffect: true, source: './style.css',
+  });
+  assert.equal(imports[1].namespace, 'utils');
+  assert.equal(imports[1].source, './utils.js');
+});
+
+test('parses hyphenated props and balanced expressions', () => {
+  const { ast } = parseMdx('<Foo data-id="x" values={{ a: 1 }} />');
+  assert.deepEqual(ast.children[0].props, [
+    { name: 'data-id', value: 'x' },
+    { name: 'values', value: { expr: '{ a: 1 }' } },
+  ]);
+});
+
+test('supports comparison operators inside prop expressions', () => {
+  const { ast } = parseMdx('<Foo cond={a > b} />');
+  assert.deepEqual(ast.children[0].props, [{ name: 'cond', value: { expr: 'a > b' } }]);
+});
+
+test('keeps spread props in the AST', () => {
+  const { ast } = parseMdx('<Foo {...props} bar="x" />');
+  assert.deepEqual(ast.children[0].props, [
+    { name: '...', value: { expr: 'props' } },
+    { name: 'bar', value: 'x' },
+  ]);
+});

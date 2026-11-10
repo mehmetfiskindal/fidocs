@@ -1,6 +1,6 @@
 {
   "name": "fidocs",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Zero-dependency documentation generator for MD/MDX with Gea component support",
   "type": "module",
   "main": "./src/index.js",
@@ -21,7 +21,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test \"tests/**/*.test.js\"",
+    "test": "node --test",
     "build:example": "node bin/fidocs.js build examples/gea-docs",
     "dev:example": "node bin/fidocs.js dev examples/gea-docs"
   },

@@ -5,8 +5,23 @@
 
 import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
+
+/** Supported output formats. */
+export const FORMATS = ['html', 'gea', 'both', 'embed'];
+
+/**
+ * Throw a clear error for an unsupported output format.
+ * @param {string} format
+ */
+export function assertFormat(format) {
+  if (!FORMATS.includes(format)) {
+    throw new Error(`Invalid format "${format}". Expected one of: ${FORMATS.join(', ')}`);
+  }
+}
+
+let configLoadId = 0;
 
 /** @type {object} */
 export const DEFAULTS = {
@@ -34,7 +49,10 @@ export async function loadConfig(root) {
   let userConfig = {};
 
   if (existsSync(jsPath)) {
-    const mod = await import(pathToFileURL(jsPath).href);
+    // Bust ESM cache so a rebuild (dev server) sees edited config values.
+    const url = pathToFileURL(jsPath);
+    url.searchParams.set('t', `${statSync(jsPath).mtimeMs}-${++configLoadId}`);
+    const mod = await import(url.href);
     userConfig = mod.default || mod;
   } else if (existsSync(jsonPath)) {
     userConfig = JSON.parse(await readFile(jsonPath, 'utf8'));

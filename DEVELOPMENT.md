@@ -226,7 +226,7 @@ Use `npm create fidocs`.
 3. **`afterParse`** plugin’ler sayfayı değiştirebilir (ör. kelime sayısı).
 4. Sayfalar `order` (yoksa 999) sonra slug ile sıralanır. Bu sıra HTML nav ve Gea `Link` listesini belirler.
 5. **HTML:** `dist/guide/install.html`. `index` → `dist/index.html`. Index yoksa motor bir dizin sayfası üretir.
-6. **Gea:** slug PascalCase bileşen adına döner (`Guide/install` benzeri yollar `generateGeaPage` içinde `-_ /` ile bölünür). Dosya `gea-app/` altına yazılır. Yerel `import './components/Foo.jsx'` varsa dosya app dizinine **kopyalanır** ki import çözülsün.
+6. **Gea:** slug PascalCase bileşen adına döner (`guide/install` → `GuideInstall`; baştaki rakamlar `Page` öneki alır, çakışan adlar `2`, `3`… ile ayrılır). Dosya `gea-app/` altına yazılır. Yerel `import './components/Foo.jsx'` varsa dosya app dizinine **kopyalanır** ki import çözülsün.
 
 ---
 
@@ -286,7 +286,7 @@ Bileşen özellikleri: `name`, `name="str"`, `name={expr}`, boolean `name`.
 {
   data,          // frontmatter
   ast,           // { type: 'root', children }
-  imports: [{ default, named, source }],
+  imports: [{ default, named, namespace, sideEffect, source }],
   components: ['Callout', 'Counter'],
 }
 ```
@@ -305,19 +305,20 @@ Bileşen özellikleri: `name`, `name="str"`, `name={expr}`, boolean `name`.
 
 ### 6.5 Gea üreteci — `src/generators/gea.js`
 
-`generateGeaPage(page)` → `{ filename, code }`.
+`generateGeaPage(page, { componentName, jsxImportSource })` → `{ filename, code }`. `componentNameFromSlug(slug)` güvenli PascalCase üretir.
 
 - Sayfa class’ı `Component` extend eder, `template()` JSX döner.
 - MDX `import` satırları dosyanın tepesine kopyalanır.
 - `{expr}` JSX `{expr}` olarak kalır.
-- Metindeki `{` `}` JSX metin kaçışına çevrilir: `{'{'}` .
+- JSX olarak yorumlanacak metin (`<`, `>`, `{`, `}`, `&`, satır sonu) string
+  ifadesine çevrilir: `{"a < b"}`. Attribute değerleri de JSON ile kaçırılır.
 
 `engine.emitGea` ek olarak:
 
 - `routes.js` — `{ path, component: () => import('./X.jsx'), title }`
 - `App.jsx` — `NavStore` + `RouterView`
 - `package.json` — `@geajs/core`, `@geajs/vite-plugin`, `vite` (tüketici `gea-app` içinde `npm install && npm run dev` yapar)
-- Yerel bileşen kopyası (`copyLocalComponents`): yalnızca `source` `.` ile başlıyorsa; path traversal’a karşı hedef `appDir` altında kalmalı.
+- Yerel bileşen kopyası (`copyLocalComponents`): yalnızca `source` `.` ile başlıyorsa; path traversal’a karşı hedef `appDir` altında kalmalı. Aynı hedefe farklı kaynaklar yazılacaksa açık hata verilir.
 
 `engine.emitEmbed` (`format: 'embed'`) aynı sayfa bileşenlerini üretir ama
 yalnızca `routes.js` ekler; `App.jsx` ve `package.json` yok. Çıktı `output/`
@@ -333,7 +334,9 @@ köküne yazılır (`config.gea.dir` kullanılmaz). Paylaşılan iş `writePageC
 2. `input` altında keşif
 3. Parse döngüsü
 4. `beforeGenerate`
-5. `output/` **silinir** (`rm` recursive) sonra yeniden yazılır
+5. `output/` **silinir** (`rm` recursive) sonra yeniden yazılır. `output`
+   proje kökü, `input` veya bunların üst dizini olamaz; aksi halde build
+   silme işleminden önce hata verir.
 6. Formata göre `emitHtml` / `emitGea`
 7. `afterGenerate`
 8. `{ pages, written }` döner
@@ -352,13 +355,13 @@ köküne yazılır (`config.gea.dir` kullanılmaz). Paylaşılan iş `writePageC
 
 Sıfır bağımlılık:
 
-- `fs.watch(docs/, { recursive: true })` — yalnızca `.md`/`.mdx`, 60 ms debounce
+- `fs.watch(config.input, { recursive: true })` — yalnızca `.md`/`.mdx`, 60 ms debounce; dizin yoksa proje kökü izlenir
 - `node:http` — `dist/` servis eder
 - SSE: `GET /__fidocs/events` → `event: reload` → HTML’e enjekte edilen `EventSource` `location.reload()`
 
 Path traversal: çözülen yol `output` kökünün dışında ise 403.
 
-Not: izlenen dizin şu an sabit `docs/` (`config.input` değil). Özel `input` ile dev izlemesi sapabilir.
+Not: izlenen dizin `config.input`'tur. Giriş dizini henüz yoksa kök izlenir, böylece oluşturulduğunda rebuild tetiklenir.
 
 ### 6.8 Plugin’ler
 
@@ -369,7 +372,7 @@ Not: izlenen dizin şu an sabit `docs/` (`config.input` değil). Özel `input` i
 | Hook | Payload | Tipik kullanım |
 |------|---------|----------------|
 | `onConfigLoad` | config | varsayılanları doldur |
-| `beforeParse` | `{ root, file }` | yan etki / log |
+| `beforeParse` | `{ root, file }` | yan etki / log; dönen `file` kullanılır |
 | `afterParse` | page | AST, title, ekstra alan |
 | `beforeGenerate` | `{ config, pages }` | sayfa listesini süz / sırala |
 | `afterGenerate` | `{ pages, written }` | rapor, kopyala |
@@ -398,13 +401,13 @@ bin/fidocs.js  →  src/cli/index.js
 ```js
 import {
   build, discover,
-  loadConfig, DEFAULTS,
+  loadConfig, DEFAULTS, FORMATS, assertFormat,
   startDevServer, watchFiles,
   parseMarkdown, parseInline, slugify,
   parseMdx, walk,
   parseFrontmatter,
   renderHtml,
-  astToJsx, generateGeaPage,
+  astToJsx, generateGeaPage, componentNameFromSlug,
   renderTemplate, escapeHtml,
   createHookRunner, loadPlugins,
   runInit, runCreate,
@@ -433,7 +436,7 @@ Bu AST hem HTML hem Gea üretecinin **tek kaynağıdır**. Yeni bir sözdizimi e
 ## 9. Geliştirme komutları
 
 ```bash
-npm test                                    # tests/**/*.test.js
+npm test                                    # node --test (tüm testler)
 node --test tests/markdown.test.js          # tek dosya
 node --test --test-name-pattern='slug' tests/markdown.test.js
 node bin/fidocs.js build examples/gea-docs  # örnek (html+gea)

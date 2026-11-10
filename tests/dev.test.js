@@ -98,3 +98,52 @@ function readFirstSseEvent(port) {
     }, 2000);
   });
 }
+
+test('does not serve files outside the configured output directory', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fidocs-dev-traversal-'));
+  await writeFile(path.join(root, 'fidocs.config.js'),
+    "export default { output: 'dist' };\n");
+  await mkdir(path.join(root, 'docs'), { recursive: true });
+  await mkdir(path.join(root, 'dist'), { recursive: true });
+  await mkdir(path.join(root, 'dist-evil'), { recursive: true });
+  await writeFile(path.join(root, 'dist', 'index.html'), '<html><body>home</body></html>');
+  await writeFile(path.join(root, 'dist-evil', 'secret.html'), 'SECRET-DATA');
+
+  const port = await freePort();
+  const server = await startDevServer({
+    root,
+    rebuild: async () => ({ written: [] }),
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/..%2fdist-evil%2fsecret`);
+    assert.equal(response.status, 403);
+    assert.doesNotMatch(await response.text(), /SECRET-DATA/);
+  } finally {
+    server.close();
+  }
+});
+
+test('starts when config.input does not exist yet', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fidocs-dev-input-'));
+  await writeFile(path.join(root, 'fidocs.config.js'),
+    "export default { input: 'content', output: 'dist' };\n");
+  await mkdir(path.join(root, 'dist'), { recursive: true });
+  await writeFile(path.join(root, 'dist', 'index.html'), '<html><body>custom</body></html>');
+
+  const port = await freePort();
+  const server = await startDevServer({
+    root,
+    rebuild: async () => ({ written: [] }),
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/`);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /custom/);
+  } finally {
+    server.close();
+  }
+});

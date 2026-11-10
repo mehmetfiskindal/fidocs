@@ -14,7 +14,10 @@ import path from 'node:path';
 export async function loadPlugins(root, pluginSpecs = []) {
   const plugins = [];
   for (const spec of pluginSpecs) {
-    if (typeof spec === 'object' && spec && spec.name) {
+    if (typeof spec === 'object' && spec) {
+      if (!spec.name) {
+        throw new Error('Inline plugins must have a "name" property.');
+      }
       plugins.push(spec);
       continue;
     }
@@ -23,8 +26,9 @@ export async function loadPlugins(root, pluginSpecs = []) {
       const url = spec.startsWith('.') || spec.startsWith('/') ? pathToFileURL(abs).href : spec;
       try {
         const mod = await import(url);
-        const plugin = mod.default || mod;
-        if (!plugin.name) plugin.name = spec;
+        // Module namespaces are sealed; copy before assigning a fallback name.
+        let plugin = mod.default || { ...mod };
+        if (!plugin.name) plugin = { ...plugin, name: spec };
         plugins.push(plugin);
       } catch (err) {
         throw new Error(`Failed to load plugin "${spec}": ${err.message}`);

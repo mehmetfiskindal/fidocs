@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderHtml } from '../src/generators/html.js';
-import { generateGeaPage, astToJsx } from '../src/generators/gea.js';
+import { generateGeaPage, astToJsx, componentNameFromSlug } from '../src/generators/gea.js';
 import { renderTemplate, escapeHtml } from '../src/generators/templates.js';
 import { parseMarkdown } from '../src/parsers/markdown.js';
 import { parseMdx } from '../src/parsers/mdx.js';
@@ -58,4 +58,43 @@ test('generateGeaPage produces valid component with imports', () => {
 test('template engine substitutes variables and blanks missing', () => {
   assert.equal(renderTemplate('Hi {{name}}!', { name: 'Fidocs' }), 'Hi Fidocs!');
   assert.equal(renderTemplate('{{missing}}', {}), '');
+});
+
+test('renders inline components in HTML', () => {
+  const { ast: a } = parseMdx('Use <Counter start={5}>hi</Counter> here.');
+  const html = renderHtml(a, {
+    resolveComponent: (name, props, children) => `<b>${name}:${children}</b>`,
+  });
+  assert.equal(html, '<p>Use <b>Counter:hi</b> here.</p>');
+});
+
+test('escapes JSX text that would be parsed as syntax', () => {
+  const jsx = astToJsx(parseMdx('a < b and x > y').ast);
+  assert.equal(jsx, '<p>{"a < b and x > y"}</p>');
+});
+
+test('escapes quotes in component string attributes', () => {
+  const { ast: a } = parseMdx('<Foo label=\'He said "hi"\' />');
+  const jsx = astToJsx(a);
+  assert.match(jsx, /label=\{"He said \\"hi\\""\}/);
+});
+
+test('derives safe component names from nested and numeric slugs', () => {
+  assert.equal(componentNameFromSlug('guide/intro'), 'GuideIntro');
+  assert.equal(componentNameFromSlug('404'), 'Page404');
+  assert.equal(componentNameFromSlug('foo.bar'), 'FooBar');
+  assert.equal(componentNameFromSlug('!!!'), 'Page');
+
+  const { ast: a } = parseMdx('# T');
+  assert.equal(generateGeaPage({ slug: 'guide/intro', imports: [], ast: a, data: {} }).filename,
+    'GuideIntro.jsx');
+  assert.match(generateGeaPage({ slug: '404', imports: [], ast: a, data: {} }).code,
+    /class Page404 extends Component/);
+});
+
+test('honors a custom JSX import source', () => {
+  const { ast: a } = parseMdx('# T');
+  const { code } = generateGeaPage({ slug: 'x', imports: [], ast: a, data: {} },
+    { jsxImportSource: '@custom/core' });
+  assert.match(code, /from '@custom\/core'/);
 });
