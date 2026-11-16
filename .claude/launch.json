@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "example-docs",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["bin/fidocs.js", "dev", "examples/gea-docs", "--port", "4321"],
+      "port": 4321
+    }
+  ]
+}

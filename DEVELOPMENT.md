@@ -272,7 +272,13 @@ Satır satır blok tokenizer:
 9. Liste  
 10. Paragraf  
 
-`parseInline` soldan sağa eşleşir: kaçış, codespan, image, link, strong, em, del, `{expr}`, dar inline HTML, hard break.
+`parseInline` soldan sağa eşleşir: kaçış, codespan, image/link, vurgu (`***`, `**`, `*`, `_`, `~~`), entity (`&amp;`, `&#169;`), autolink (`<https://…>`), `{expr}`, dar inline HTML, hard break.
+
+- Vurgu ayraçları **flanking** olmalı (`2 * 3` vurgu değildir) ve kapanış aranırken codespan'ler atlanır.
+- Link hedefleri dengeli parantez ve `<…>` destekler. Tüm link/görsel URL'leri parse sırasında `sanitizeUrl` ile süzülür: `http(s)`, `mailto`, `tel` ve göreli URL'ler geçer, diğer şemalar (`javascript:`, `data:` …) `#` olur; görsellerde `data:image/*` serbesttir. Ham HTML bloklarına dokunulmaz.
+- Entity'ler parse sırasında çözülür; üreteçler metni normal şekilde kaçışlar.
+- Fence kapanışı aynı karakterle ve en az açılış uzunluğunda olmalıdır; info string'in ilk kelimesi `lang` olur.
+- `> [!NOTE|TIP|IMPORTANT|WARNING|CAUTION]` ile başlayan blockquote `callout` düğümü olur.
 
 **Gotcha:** `RE_EXPR` bilerek `new RegExp('...')` ile kurulur. Ham regex literal’in yanlış parse edildiği görülmüş; dokunurken `new RegExp` kalsın.
 
@@ -422,7 +428,7 @@ Kütüphane kullanımı CLI ile aynı motoru çağırır; ayrı bir “runtime�
 
 ## 8. Veri: AST düğümleri
 
-Blok: `root`, `heading`, `paragraph`, `code`, `blockquote`, `list`, `listItem`, `table`, `hr`, `html`, `import`, `component`.
+Blok: `root`, `heading`, `paragraph`, `code`, `blockquote`, `callout` (`kind`), `list` (`ordered`, sıralıysa `start`), `listItem` (görev maddesiyse `checked: boolean`), `table`, `hr`, `html`, `import`, `component`.
 
 Inline: `text`, `strong`, `em`, `del`, `codespan`, `link`, `image`, `expression`, `inlineHtml`, `break`.
 

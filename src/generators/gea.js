@@ -5,6 +5,8 @@
  * so @geajs/vite-plugin can compile them.
  */
 
+import { CALLOUT_TITLES } from './html.js';
+
 /**
  * Render an AST to a JSX string (the article body).
  * @param {{ children: object[] }} ast
@@ -24,10 +26,20 @@ function nodeToJsx(node) {
       return `<pre class="code"${node.lang ? ` data-lang=${jsxStringAttr(node.lang)}` : ''}><code>${jsxText(node.value)}</code></pre>`;
     case 'blockquote':
       return `<blockquote>\n${node.children.map(nodeToJsx).join('\n')}\n</blockquote>`;
+    case 'callout': {
+      const title = CALLOUT_TITLES[node.kind] || node.kind;
+      const body = node.children.map(nodeToJsx).filter((l) => l.trim()).join('\n');
+      return `<div class="callout callout-${node.kind}">\n<p class="callout-title">${jsxText(title)}</p>${body ? `\n${body}` : ''}\n</div>`;
+    }
     case 'list': {
       const tag = node.ordered ? 'ol' : 'ul';
-      const items = node.children.map((li) => `<li>${li.children.map(listItemJsx).join('')}</li>`);
-      return `<${tag}>\n${items.join('\n')}\n</${tag}>`;
+      const start = node.ordered && Number.isInteger(node.start) && node.start !== 1 ? ` start="${node.start}"` : '';
+      const items = node.children.map((li) => {
+        const content = li.children.map(listItemJsx).join('');
+        if (typeof li.checked !== 'boolean') return `<li>${content}</li>`;
+        return `<li class="task-list-item"><input type="checkbox" disabled${li.checked ? ' checked' : ''} /> ${content}</li>`;
+      });
+      return `<${tag}${start}>\n${items.join('\n')}\n</${tag}>`;
     }
     case 'table': {
       const head = node.header.map((c) => `<th>${inlineToJsx(c)}</th>`).join('');

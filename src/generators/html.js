@@ -6,6 +6,10 @@
 
 import { escapeHtml } from './templates.js';
 
+export const CALLOUT_TITLES = {
+  note: 'Note', tip: 'Tip', important: 'Important', warning: 'Warning', caution: 'Caution',
+};
+
 /**
  * @typedef {(name: string, props: Record<string, unknown>, childrenHtml: string) => string} ComponentResolver
  */
@@ -48,10 +52,20 @@ function renderNode(node, opts) {
       }</code></pre>`;
     case 'blockquote':
       return `<blockquote>${renderNodes(node.children, opts)}</blockquote>`;
+    case 'callout': {
+      const title = CALLOUT_TITLES[node.kind] || node.kind;
+      const body = renderNodes(node.children, opts);
+      return `<div class="callout callout-${escapeHtml(node.kind)}"><p class="callout-title">${escapeHtml(title)}</p>${body ? `\n${body}` : ''}</div>`;
+    }
     case 'list': {
       const tag = node.ordered ? 'ol' : 'ul';
-      const items = node.children.map((li) => `<li>${renderListItem(li, opts)}</li>`).join('');
-      return `<${tag}>${items}</${tag}>`;
+      const start = node.ordered && Number.isInteger(node.start) && node.start !== 1 ? ` start="${node.start}"` : '';
+      const items = node.children.map((li) => {
+        if (typeof li.checked !== 'boolean') return `<li>${renderListItem(li, opts)}</li>`;
+        const box = `<input type="checkbox" disabled${li.checked ? ' checked' : ''}>`;
+        return `<li class="task-list-item">${box} ${renderListItem(li, opts)}</li>`;
+      }).join('');
+      return `<${tag}${start}>${items}</${tag}>`;
     }
     case 'table': {
       const head = node.header.map((c) => `<th>${renderInline(c, opts)}</th>`).join('');

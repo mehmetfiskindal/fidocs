@@ -5,7 +5,8 @@
  */
 
 const RE = {
-  fence: /^(```+|~~~+)\s*([\w+-]*)\s*$/,
+  // Opening fence; backtick info strings may not contain backticks.
+  fence: /^(?:(`{3,})\s*([^`]*)|(~{3,})\s*(.*))$/,
   heading: /^(#{1,6})\s+(.*)$/,
   hr: /^ {0,3}([-*_])( *\1){2,} *$/,
   quote: /^ {0,3}>\s?(.*)$/,
@@ -23,6 +24,42 @@ const RE_TAG = /^<([A-Za-z][\w.-]*)((?:\s+(?:"[^"]*"|'[^']*'|\{[^}]*\}|[^>"'])*)
 // Inline MDX expression: {identifier}, {a.b}, {x: 1}, etc. Built via
 // new RegExp to keep the pattern robust.
 const RE_EXPR = new RegExp('^\\{([^{}]+)\\}');
+
+// GitHub-style alert marker on the first line of a blockquote.
+const RE_CALLOUT = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$/i;
+
+// Task list marker at the start of a list item.
+const RE_TASK = /^\[([ xX])\]\s+/;
+
+// Autolink: <scheme:...> with no spaces or angle brackets.
+const RE_AUTOLINK = /^<((?:https?|mailto|tel):[^\s<>]+)>/i;
+
+const NAMED_ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', copy: '©', reg: '®',
+  trade: '™', hellip: '…', mdash: '—', ndash: '–', larr: '←', rarr: '→', uarr: '↑', darr: '↓',
+  laquo: '«', raquo: '»', middot: '·', times: '×', deg: '°',
+};
+const RE_ENTITY = /^&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));/;
+
+const SAFE_SCHEMES = new Set(['http', 'https', 'mailto', 'tel']);
+
+/**
+ * Neutralize URLs with script-capable schemes (javascript:, vbscript:,
+ * data: etc.). Relative URLs, fragments and http(s)/mailto/tel pass through;
+ * images may additionally use data:image/*.
+ * @param {string} url
+ * @param {{ image?: boolean }} [opts]
+ * @returns {string}
+ */
+export function sanitizeUrl(url, opts = {}) {
+  // Browsers ignore control characters and whitespace inside the scheme.
+  const probe = String(url).replace(/[\u0000- \u007f]/g, '').toLowerCase();
+  const scheme = /^([a-z][a-z0-9+.-]*):/.exec(probe);
+  if (!scheme) return url;
+  if (SAFE_SCHEMES.has(scheme[1])) return url;
+  if (opts.image && /^data:image\/(png|jpe?g|gif|webp|avif|svg\+xml);/.test(probe)) return url;
+  return '#';
+}
 
 const INLINE_HTML_TAGS = new Set([
   'br', 'kbd', 'mark', 'sup', 'sub', 'abbr', 'span', 'b', 'i', 'u', 'small', 'code', 'pre',
@@ -78,11 +115,14 @@ function parseBlocks(lines) {
     // Fenced code
     const fence = RE.fence.exec(line.trim());
     if (fence) {
-      const marker = fence[1][0];
-      const lang = fence[2] || null;
+      const opener = fence[1] || fence[3];
+      const info = (fence[2] ?? fence[4] ?? '').trim();
+      const lang = info.split(/\s+/)[0] || null;
+      // Closing fence: same character, at least as long, nothing else.
+      const closeRe = new RegExp(`^${opener[0] === '`' ? '`' : '~'}{${opener.length},}\\s*$`);
       const body = [];
       i++;
-      while (i < lines.length && !(lines[i].trim().startsWith(marker.repeat(3)) && RE.fence.test(lines[i].trim()))) {
+      while (i < lines.length && !closeRe.test(lines[i].trim())) {
         body.push(lines[i]); i++;
       }
       i++;
@@ -139,7 +179,12 @@ function parseBlocks(lines) {
         body.push(current);
         i++;
       }
-      blocks.push({ type: 'blockquote', children: parseBlocks(body) });
+      const callout = RE_CALLOUT.exec(body[0] || '');
+      if (callout) {
+        blocks.push({ type: 'callout', kind: callout[1].toLowerCase(), children: parseBlocks(body.slice(1)) });
+      } else {
+        blocks.push({ type: 'blockquote', children: parseBlocks(body) });
+      }
       continue;
     }
 
@@ -203,6 +248,7 @@ function isListLine(line) {
 function parseList(lines, start) {
   const first = RE.ulItem.exec(lines[start]) || RE.olItem.exec(lines[start]);
   const ordered = /^\s*\d/.test(lines[start]);
+  const startNum = ordered ? Number.parseInt(first[2], 10) : null;
   const baseIndent = first[1].length;
   const items = [];
   let i = start;
@@ -238,12 +284,17 @@ function parseList(lines, start) {
   }
 
   const children = items.map((it) => {
-    const own = [it.text, ...it.lines].join('\n');
+    let own = [it.text, ...it.lines].join('\n');
+    const task = RE_TASK.exec(own);
+    if (task) own = own.slice(task[0].length);
     const node = { type: 'listItem', children: [{ type: 'paragraph', children: parseInline(own) }, ...it.children] };
+    if (task) node.checked = task[1] !== ' ';
     return node;
   });
 
-  return { node: { type: 'list', ordered, spread: false, children }, consumed: i - start };
+  const node = { type: 'list', ordered, spread: false, children };
+  if (ordered) node.start = startNum;
+  return { node, consumed: i - start };
 }
 
 function escapeRegExp(value) {
@@ -524,21 +575,37 @@ export function parseInline(text) {
     let m;
 
     if ((m = /^\\([\\`*_{}\[\]()#+\-.!|>~])/.exec(rest))) { buffer += m[1]; rest = rest.slice(2); continue; }
-    if ((m = /^`([^`]+)`/.exec(rest))) { flush(); nodes.push({ type: 'codespan', value: m[1] }); rest = rest.slice(m[0].length); continue; }
-    if ((m = /^!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/.exec(rest))) {
-      flush(); nodes.push({ type: 'image', alt: m[1], url: m[2], title: m[3] || null }); rest = rest.slice(m[0].length); continue;
+    if ((m = /^(`+)([\s\S]*?[^`])\1(?!`)/.exec(rest))) {
+      let value = m[2];
+      if (/^ [\s\S]* $/.test(value) && value.trim()) value = value.slice(1, -1);
+      flush(); nodes.push({ type: 'codespan', value }); rest = rest.slice(m[0].length); continue;
     }
-    if ((m = /^\[([^\]]+)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/.exec(rest))) {
-      flush(); nodes.push({ type: 'link', children: parseInline(m[1]), url: m[2], title: m[3] || null }); rest = rest.slice(m[0].length); continue;
+    if (rest[0] === '`') {
+      // Unmatched backtick run is literal text.
+      const run = /^`+/.exec(rest)[0];
+      buffer += run; rest = rest.slice(run.length); continue;
     }
-    if ((m = /^(\*\*|__)([\s\S]+?)\1/.exec(rest))) { flush(); nodes.push({ type: 'strong', children: parseInline(m[2]) }); rest = rest.slice(m[0].length); continue; }
-    if ((m = /^(\*|_)([\s\S]+?)\1/.exec(rest)) &&
-        !(m[1] === '_' &&
-          /[\p{L}\p{N}]/u.test(buffer.slice(-1)) &&
-          /[\p{L}\p{N}]/u.test(rest[m[0].length] || ''))) {
-      flush(); nodes.push({ type: 'em', children: parseInline(m[2]) }); rest = rest.slice(m[0].length); continue;
+    if (rest[0] === '[' || (rest[0] === '!' && rest[1] === '[')) {
+      const link = parseLink(rest);
+      if (link) { flush(); nodes.push(link.node); rest = rest.slice(link.length); continue; }
     }
-    if ((m = /^~~([\s\S]+?)~~/.exec(rest))) { flush(); nodes.push({ type: 'del', children: parseInline(m[1]) }); rest = rest.slice(m[0].length); continue; }
+    if (rest[0] === '*' || rest[0] === '_' || rest[0] === '~') {
+      const emph = parseEmphasis(rest, buffer.slice(-1));
+      if (emph) { flush(); nodes.push(emph.node); rest = rest.slice(emph.length); continue; }
+      // Consume the whole delimiter run so a later char of it cannot open.
+      const run = new RegExp(`^\\${rest[0]}+`).exec(rest)[0];
+      buffer += run; rest = rest.slice(run.length); continue;
+    }
+    if ((m = RE_ENTITY.exec(rest))) {
+      const decoded = decodeEntity(m);
+      if (decoded !== null) { buffer += decoded; rest = rest.slice(m[0].length); continue; }
+    }
+    if ((m = RE_AUTOLINK.exec(rest))) {
+      flush();
+      nodes.push({ type: 'link', children: [{ type: 'text', value: m[1] }], url: sanitizeUrl(m[1]), title: null });
+      rest = rest.slice(m[0].length);
+      continue;
+    }
     if ((m = RE_EXPR.exec(rest))) { flush(); nodes.push({ type: 'expression', value: m[1].trim() }); rest = rest.slice(m[0].length); continue; }
 
     // Inline JSX component or known inline HTML tag.
@@ -600,6 +667,181 @@ export function parseInline(text) {
 
   flush();
   return nodes;
+}
+
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+/**
+ * Skip a code span starting at `i` (text[i] === '`').
+ * @returns {number} index just past the span, or past the backtick run if unclosed
+ */
+function skipCodeSpan(text, i) {
+  let run = 0;
+  while (text[i + run] === '`') run++;
+  const ticks = '`'.repeat(run);
+  let j = text.indexOf(ticks, i + run);
+  while (j !== -1 && text[j + run] === '`') {
+    let k = j; while (text[k] === '`') k++;
+    j = text.indexOf(ticks, k);
+  }
+  return j === -1 ? i + run : j + run;
+}
+
+/**
+ * Parse `[text](dest "title")` or `![alt](dest "title")` at the start of `text`.
+ * @returns {{ node: object, length: number } | null}
+ */
+function parseLink(text) {
+  const image = text[0] === '!';
+  const open = image ? 1 : 0;
+  const close = findBracketClose(text, open);
+  if (close === -1 || text[close + 1] !== '(') return null;
+  const dest = parseLinkDestination(text, close + 1);
+  if (!dest) return null;
+  const label = text.slice(open + 1, close);
+  const node = image
+    ? { type: 'image', alt: label, url: sanitizeUrl(dest.url, { image: true }), title: dest.title }
+    : { type: 'link', children: parseInline(label), url: sanitizeUrl(dest.url), title: dest.title };
+  if (!image && !label) return null;
+  return { node, length: dest.end };
+}
+
+/** Index of the `]` matching the `[` at `start`, skipping escapes and code spans. */
+function findBracketClose(text, start) {
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '\\') { i++; continue; }
+    if (ch === '`') { i = skipCodeSpan(text, i) - 1; continue; }
+    if (ch === '[') depth++;
+    else if (ch === ']') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Parse a link destination and optional title starting at the `(` at `start`.
+ * Supports `<...>` destinations and balanced parentheses.
+ * @returns {{ url: string, title: string | null, end: number } | null}
+ */
+function parseLinkDestination(text, start) {
+  let i = start + 1;
+  const skipSpace = () => { while (i < text.length && /[ \t\n]/.test(text[i])) i++; };
+  skipSpace();
+
+  let url = '';
+  if (text[i] === '<') {
+    const end = text.indexOf('>', i);
+    if (end === -1 || text.slice(i, end).includes('\n')) return null;
+    url = text.slice(i + 1, end);
+    i = end + 1;
+  } else {
+    let depth = 0;
+    while (i < text.length) {
+      const ch = text[i];
+      if (/\s/.test(ch)) break;
+      if (ch === '\\' && i + 1 < text.length && /[()\\]/.test(text[i + 1])) { url += text[i + 1]; i += 2; continue; }
+      if (ch === '(') depth++;
+      else if (ch === ')') {
+        if (depth === 0) break;
+        depth--;
+      }
+      url += ch;
+      i++;
+    }
+    if (depth !== 0) return null;
+  }
+
+  skipSpace();
+  let title = null;
+  const q = text[i];
+  if (q === '"' || q === "'" || q === '(') {
+    const closer = q === '(' ? ')' : q;
+    let value = '';
+    i++;
+    while (i < text.length && text[i] !== closer) {
+      if (text[i] === '\\' && i + 1 < text.length) { value += text[i + 1]; i += 2; continue; }
+      value += text[i++];
+    }
+    if (i >= text.length) return null;
+    i++;
+    title = value;
+    skipSpace();
+  }
+
+  if (text[i] !== ')') return null;
+  return { url, title, end: i + 1 };
+}
+
+/**
+ * Parse emphasis (`*`, `_`), strong, strong+em (`***`) or strikethrough
+ * (`~~`) at the start of `text`. Delimiters must be flanking: the opener
+ * may not be followed by whitespace and the closer may not follow it.
+ * Code spans inside are skipped when looking for the closer.
+ * @param {string} text
+ * @param {string} prev - character before the delimiter run
+ * @returns {{ node: object, length: number } | null}
+ */
+function parseEmphasis(text, prev) {
+  const ch = text[0];
+  if (ch === '_' && WORD_CHAR.test(prev)) return null;
+  let run = 0;
+  while (text[run] === ch) run++;
+  const sizes = ch === '~' ? (run >= 2 ? [2] : []) : [3, 2, 1].filter((n) => n <= run);
+
+  for (const n of sizes) {
+    if (!text[n] || /\s/.test(text[n])) continue;
+    const close = findEmphasisCloser(text, n, ch, n);
+    if (close === -1) continue;
+    const inner = parseInline(text.slice(n, close));
+    let node;
+    if (ch === '~') node = { type: 'del', children: inner };
+    else if (n === 3) node = { type: 'strong', children: [{ type: 'em', children: inner }] };
+    else if (n === 2) node = { type: 'strong', children: inner };
+    else node = { type: 'em', children: inner };
+    return { node, length: close + n };
+  }
+  return null;
+}
+
+/**
+ * Find where a delimiter of length `n` closes, scanning from `from`.
+ * Nested runs of a different length (e.g. `**` inside `*...*`) are skipped.
+ * @returns {number} index of the closing delimiter, or -1
+ */
+function findEmphasisCloser(text, from, ch, n) {
+  let i = from;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '\\') { i += 2; continue; }
+    if (c === '`') { i = skipCodeSpan(text, i); continue; }
+    if (c !== ch) { i++; continue; }
+
+    let run = 0;
+    while (text[i + run] === ch) run++;
+    const rightFlanking = i > from && !/\s/.test(text[i - 1]);
+    const intraword = ch === '_' && WORD_CHAR.test(text[i + run] || '');
+    if (rightFlanking && !intraword && run >= n && !(run < 3 && run !== n)) {
+      return i + run - n;
+    }
+    i += run;
+  }
+  return -1;
+}
+
+/**
+ * Decode an entity reference match from RE_ENTITY.
+ * @returns {string | null} decoded text, or null for unknown names
+ */
+function decodeEntity(m) {
+  if (m[1] || m[2]) {
+    const code = Number.parseInt(m[1] || m[2], m[1] ? 10 : 16);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '�';
+  }
+  return Object.hasOwn(NAMED_ENTITIES, m[3]) ? NAMED_ENTITIES[m[3]] : null;
 }
 
 /**
