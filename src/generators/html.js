@@ -24,6 +24,47 @@ export function renderHtml(ast, opts = {}) {
   return renderNodes(ast.children, opts);
 }
 
+const TOC_MIN_ENTRIES = 2;
+
+/**
+ * Render the "On this page" list from top-level h2/h3 headings. An h3
+ * nests under the closest preceding h2; one with no h2 before it stays
+ * at the top level.
+ * @param {{ children: object[] }} ast
+ * @returns {string} empty string when there are fewer than two entries
+ */
+export function renderToc(ast) {
+  const headings = ast.children.filter((n) => n.type === 'heading' && (n.level === 2 || n.level === 3));
+  if (headings.length < TOC_MIN_ENTRIES) return '';
+
+  const link = (h) => `<a href="#${escapeHtml(h.id)}">${escapeHtml(plainText(h.children))}</a>`;
+  const items = [];
+  for (const h of headings) {
+    const parent = items[items.length - 1];
+    if (h.level === 3 && parent && parent.level === 2) parent.subs.push(h);
+    else items.push({ level: h.level, heading: h, subs: [] });
+  }
+
+  const list = items.map(({ heading, subs }) => {
+    const nested = subs.length ? `<ul>${subs.map((s) => `<li>${link(s)}</li>`).join('')}</ul>` : '';
+    return `<li>${link(heading)}${nested}</li>`;
+  }).join('');
+  return `<aside class="page-toc"><h2>On this page</h2><ul>${list}</ul></aside>`;
+}
+
+/**
+ * Concatenate the visible text of inline nodes, dropping markup.
+ * @param {object[]} nodes
+ * @returns {string}
+ */
+function plainText(nodes) {
+  return nodes.map((n) => {
+    if (n.type === 'text' || n.type === 'codespan') return n.value;
+    if (n.type === 'image') return n.alt || '';
+    return Array.isArray(n.children) ? plainText(n.children) : '';
+  }).join('');
+}
+
 function renderNodes(nodes, opts) {
   return nodes.map((n) => renderNode(n, opts)).filter((s) => typeof s === 'string' && s.trim()).join('\n');
 }

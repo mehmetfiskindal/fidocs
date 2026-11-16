@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseMdx } from '../parsers/mdx.js';
-import { renderHtml } from '../generators/html.js';
+import { renderHtml, renderToc } from '../generators/html.js';
 import { generateGeaPage, componentNameFromSlug } from '../generators/gea.js';
 import { renderTemplate, escapeHtml } from '../generators/templates.js';
 import { createHookRunner } from '../plugins/hooks.js';
@@ -177,9 +177,13 @@ async function emitHtml(config, pages, outDir, root) {
     : path.join(HERE, '..', '..', 'templates', 'base.html');
   const tpl = await readFile(templatePath, 'utf8');
 
-  const nav = pages
-    .map((p) => `<li><a href="/${p.slug === 'index' ? '' : p.slug + '.html'}">${escapeHtml(p.title)}</a></li>`)
+  const navFor = (current) => pages
+    .map((p) => {
+      const active = p === current ? ' class="active" aria-current="page"' : '';
+      return `<li><a href="/${p.slug === 'index' ? '' : p.slug + '.html'}"${active}>${escapeHtml(p.title)}</a></li>`;
+    })
     .join('');
+  const nav = navFor(null);
 
   const resolver = config.components
     ? (name, props, children) => {
@@ -194,8 +198,9 @@ async function emitHtml(config, pages, outDir, root) {
       title: escapeHtml(page.title),
       siteTitle: escapeHtml(config.title),
       description: escapeHtml(page.data.description || config.description),
-      nav,
+      nav: navFor(page),
       content: body,
+      toc: page.data.toc === false ? '' : renderToc(page.ast),
     });
     const out = path.join(outDir, page.slug === 'index' ? 'index.html' : `${page.slug}.html`);
     await mkdir(path.dirname(out), { recursive: true });

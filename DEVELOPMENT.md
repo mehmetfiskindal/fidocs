@@ -209,6 +209,7 @@ Fidocs bir **boru hattı**. Katmanlar tek yönlü akar; parser HTML bilmez, HTML
 ---
 title: Installation
 order: 2
+# toc: false   # sayfa içi başlık listesini gizler (HTML çıktısı)
 ---
 
 # Install
@@ -307,7 +308,11 @@ Bileşen özellikleri: `name`, `name="str"`, `name={expr}`, boolean `name`.
 - `expression` → `<span class="fidocs-expr" data-expr="…">` (statik HTML’de çalışmaz; işaretçi).
 - Liste öğesinde tek paragraf varsa CommonMark “tight list” gibi inline basılır.
 
-Şablon: `templates/base.html` veya `config.template`. Yer tutucular `{{title}}`, `{{siteTitle}}`, `{{description}}`, `{{nav}}`, `{{content}}`. Motor değerleri *kaçırılmış* halde verir; `renderTemplate` olduğu gibi yapıştırır.
+Şablon: `templates/base.html` veya `config.template`. Yer tutucular `{{title}}`, `{{siteTitle}}`, `{{description}}`, `{{nav}}`, `{{content}}`, `{{toc}}`. Motor değerleri *kaçırılmış* halde verir; `renderTemplate` olduğu gibi yapıştırır.
+
+- `{{nav}}` her sayfa için ayrı üretilir; geçerli sayfanın linki `class="active" aria-current="page"` alır.
+- `{{toc}}` = `renderToc(ast)`: üst düzey h2/h3 başlıklarından "On this page" listesi (h3, önceki h2'nin altına girer). İkiden az başlık varsa ya da frontmatter'da `toc: false` varsa boş string. `{{toc}}` içermeyen özel şablonlar etkilenmez.
+- Karanlık mod tamamen şablonda: CSS değişkenleri `prefers-color-scheme` ile ve `:root[data-theme="dark"|"light"]` ile değişir. `.theme-toggle` düğmesi seçimi `localStorage` içindeki `fidocs-theme` anahtarına yazar; `<head>`'deki küçük betik sayfa çizilmeden önce bu seçimi uygular. Gea uygulaması (`format: 'gea'`) bu şablonu kullanmaz.
 
 ### 6.5 Gea üreteci — `src/generators/gea.js`
 
